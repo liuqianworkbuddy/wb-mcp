@@ -1,0 +1,19 @@
+{
+  "name": "wb-mcp",
+  "version": "5.10.1",
+  "private": true,
+  "description": "AI 工作台 wb-cli 的 MCP server 壳（stdio transport）",
+  "type": "module",
+  "bin": {
+    "wb-mcp": "scripts/wb-mcp.mjs"
+  },
+  "scripts": {
+    "start": "node scripts/wb-mcp.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
