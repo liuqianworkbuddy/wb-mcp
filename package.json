@@ -8,7 +8,8 @@
     "wb-mcp": "scripts/wb-mcp.mjs"
   },
   "scripts": {
-    "start": "node scripts/wb-mcp.mjs"
+    "start": "node scripts/wb-mcp.mjs",
+    "probe": "node scripts/probe.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0"
