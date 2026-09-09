@@ -4,7 +4,7 @@
  * - BUILD_AT：构建时间由 next.config.ts env 注入（NEXT_PUBLIC_BUILD_AT），
  *   静态导出后固化在产物里 = 该版本的上线时间；拿不到时降级为空（只显示版本号）。
  */
-export const APP_VERSION = 'v5.10.1';
+export const APP_VERSION = 'v5.12.0';
 
 /** 构建时间（ISO 字符串，构建时注入；开发态为空） */
 export const BUILD_AT = process.env.NEXT_PUBLIC_BUILD_AT || '';
@@ -36,6 +36,28 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  {
+    version: 'v5.12.0',
+    at: '09-09 22:15',
+    items: [
+      'AI 记录有回音了：通过 wb-mcp 写入的笔记/待办/日程/点子，AI 会收到「已记录到 AI 工作台 ✅」式摘要（类型/标题/标签/时间/去哪看），不再只是干巴巴的代码数据',
+      '摘要人机两用：AI 看得懂人话摘要，程序也能照常读到完整数据，两边互不耽误',
+      '修复一个隐患：之前 AI 批量写入时偶尔一条变两条，根因是命令行回显混进了数据通道——已根治，从此写一条就是一条',
+    ],
+  },
+  {
+    version: 'v5.11.0',
+    at: '09-07 02:00',
+    items: [
+      '命令行助手大升级：新增 6 个管理命令（环境自检 doctor、用量配额 quota、开发任务 task、自更新 update、新手配置 setup、帮助 help），AI 和终端都能一句话调用',
+      'AI 写数据更精准：新增 12 个细粒度写入工具（完成待办、记笔记等一步到位），不用再为改一个字拉整张表',
+      '数据接口格式统一：所有查询结果换新格式返回，外部 AI 工具接入更省心（⚠️ 接过老格式的工具需要按新格式适配：返回体 {success,data,error}、列表 {data,total,has_more,next_cursor}）',
+      '查询更稳：长列表支持翻页续读，彻底告别超长内容被拦腰截断',
+      '防误改三件套：写操作查表确认、超时分三档、重复请求自动去重（幂等键），AI 批量干活更放心',
+      '超长内容直通车：写长笔记可以走文件通道，多长的文章都一键写入不再卡壳',
+      '工程化收尾：命令能力清单机器可读（capabilities）、环境五层自检（doctor）、自带 15 个自动化测试',
+    ],
+  },
   {
     version: 'v5.10.1',
     at: '09-07 00:45',

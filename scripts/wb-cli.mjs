@@ -560,8 +560,12 @@ async function dispatchAdd(type, c, flags, raw) {
   const echoLines = plan.rows.map((r) => `  → ${r.table}：${r.label}`);
   if (plan.mirror === 'idea') echoLines.push('  → todos：镜像行（category=AI灵感，description 带 ai_ideas id 回指）');
   if (plan.mirror === 'bug') echoLines.push('  → todos：镜像行（category=开发待办，dev_bug_id 挂接）');
-  console.log(`将写入 · 类型：${TYPE_LABEL[type]}${c.reason ? `（${c.reason}）` : ''}`);
-  echoLines.forEach((l) => console.log(l));
+  // 🔴 --json 模式回显必须走 stderr（stdout 只留数据）：曾因回显污染 stdout，
+  // wb-mcp 判定「非 JSON」后关 --json 重试一次 = 写命令双写。console.error 在
+  // 非 json 模式仍写 stdout，人读体验不变。
+  const echo = (l) => (FLAGS.json ? console.error(l) : console.log(l));
+  echo(`将写入 · 类型：${TYPE_LABEL[type]}${c.reason ? `（${c.reason}）` : ''}`);
+  echoLines.forEach((l) => echo(l));
 
   if (!flags.yes) {
     if (process.stdin.isTTY) {
@@ -632,8 +636,8 @@ async function addBook(filePath, noteText, flags) {
   const size = statSync(abs).size;
   const title = (noteText || '').trim() || bookTitleFromFilename(basename(abs));
 
-  console.log(`将写入 · 类型：电子书`);
-  console.log(`  → books：${title}（format=${format}，${(size / 1024 / 1024).toFixed(2)}MB）`);
+  (FLAGS.json ? console.error : console.log)(`将写入 · 类型：电子书`);
+  (FLAGS.json ? console.error : console.log)(`  → books：${title}（format=${format}，${(size / 1024 / 1024).toFixed(2)}MB）`);
   if (!flags.yes) {
     if (process.stdin.isTTY) {
       const ok = await confirm('确认写入？');
@@ -745,7 +749,8 @@ async function findByIdPrefix(table, idPrefix, select = '*') {
 
 /** 写操作安全门（回显 + 确认 + --yes；非 TTY 需 --yes） */
 async function writeGuard(label, flags) {
-  console.log(`将执行 · ${label}`);
+  // 🔴 --json 时回显走 stderr（stdout 只留数据，防 wb-mcp 误判重试导致双写）
+  (FLAGS.json ? console.error : console.log)(`将执行 · ${label}`);
   if (flags.yes) return true;
   if (process.stdin.isTTY) {
     const ok = await confirm('确认执行？');

@@ -6,20 +6,18 @@
  * 供 Codex / DeepSeek CLI / Claude Code / WorkBuddy 等 MCP 客户端直连。
  *
  * 启动：
- *   node scripts/wb-mcp.mjs                    # 默认 workbuddy 渠道
- *   WB_PROFILE=hermes node scripts/wb-mcp.mjs  # 只读（旧约定兼容：渠道名 hermes=readonly）
+ *   node scripts/wb-mcp.mjs                    # 默认 workbuddy profile（admin key）
+ *   WB_PROFILE=hermes node scripts/wb-mcp.mjs  # readonly（只注册 wb_query）
  *
  * 环境变量：
- *   WB_PROFILE=<渠道名>     仅决定读哪个渠道文件 ~/.workbuddy/agents/<渠道名>.env
- *   WB_SCOPE=admin|readwrite|readonly   权限档位（显式声明优先于渠道名旧约定）
+ *   WB_PROFILE=workbuddy|openclaw|hermes   key 档位（hermes=readonly 双保险）
  *
- * 接入指南：README.md（授权需在 liflow.cn/settings 自助签发 wbk_ key）
+ * 接入指南：docs/wb-mcp-接入指南.md
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { startServer } from '../lib/wb-mcp/server.mjs';
-import { resolveAuth } from '../lib/wb-auth.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -35,11 +33,7 @@ function readVersion() {
 }
 
 const PROFILE = process.env.WB_PROFILE || 'workbuddy';
-// 权限档位由渠道里显式声明的 WB_SCOPE 决定（admin/readwrite/readonly），
-// 渠道名不再隐含权限；未声明时兼容旧约定（渠道名 hermes = 只读）。
-// scope 只影响本地注册哪些工具，越权拦截在服务端（key scope 校验 + RLS）。
-const SCOPE = resolveAuth().scope;
-const READONLY = SCOPE ? SCOPE === 'readonly' : PROFILE === 'hermes';
+const READONLY = PROFILE === 'hermes';
 
 // 🔴 MCP stdio 协议流专用 stdout——任何 console.log 都会污染协议帧，
 // 全部诊断信息走 stderr。
@@ -50,7 +44,7 @@ const log = {
 
 async function main() {
   const version = readVersion();
-  log.info(`启动 ${version} · profile=${PROFILE}${SCOPE ? ` · scope=${SCOPE}` : ' · scope=未声明'}${READONLY ? '（readonly，仅 wb_query）' : ''}`);
+  log.info(`启动 ${version} · profile=${PROFILE}${READONLY ? '（readonly，仅 wb_query）' : ''}`);
   await startServer({ version, readonly: READONLY, logger: log });
   log.info('stdio transport 就绪，等待客户端连接');
 }
