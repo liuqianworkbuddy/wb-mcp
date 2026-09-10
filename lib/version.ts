@@ -4,7 +4,7 @@
  * - BUILD_AT：构建时间由 next.config.ts env 注入（NEXT_PUBLIC_BUILD_AT），
  *   静态导出后固化在产物里 = 该版本的上线时间；拿不到时降级为空（只显示版本号）。
  */
-export const APP_VERSION = 'v5.12.0';
+export const APP_VERSION = 'v5.12.1';
 
 /** 构建时间（ISO 字符串，构建时注入；开发态为空） */
 export const BUILD_AT = process.env.NEXT_PUBLIC_BUILD_AT || '';
@@ -36,6 +36,15 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  {
+    version: 'v5.12.1',
+    at: '09-10 20:35',
+    items: [
+      'AI 记录不再走错门：模糊的「帮我记录一下」一律先进 AI 判类通道自动归类，只有明确说「记笔记/记点子/加日程」才直进对应功能',
+      '服务器使用说明和工具自述改为互斥式写法（谁管泛化、谁管点名），各家 AI 助手（ZCode/Codex 等）接入时不再靠猜',
+      '录入内容强调原文照存：AI 不再顺手润色改写，你说了什么就存什么',
+    ],
+  },
   {
     version: 'v5.12.0',
     at: '09-09 22:15',
