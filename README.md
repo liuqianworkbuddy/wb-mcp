@@ -3,7 +3,7 @@
 AI 工作台 wb-cli 的 MCP server 壳（stdio transport）。把 wb-cli 命令族暴露为标准 MCP tool，
 供 Codex / DeepSeek CLI / Claude Code / WorkBuddy 等 MCP 客户端直连。
 
-> 版本：5.13.0 · 由主仓 \`scripts/release-wb-mcp.mjs\` 一键同步发布
+> 版本：5.14.0 · 由主仓 \`scripts/release-wb-mcp.mjs\` 一键同步发布
 
 ## 三步安装（任意机器）
 

@@ -4,7 +4,7 @@
  * - BUILD_AT：构建时间由 next.config.ts env 注入（NEXT_PUBLIC_BUILD_AT），
  *   静态导出后固化在产物里 = 该版本的上线时间；拿不到时降级为空（只显示版本号）。
  */
-export const APP_VERSION = 'v5.13.0';
+export const APP_VERSION = 'v5.14.0';
 
 /** 构建时间（ISO 字符串，构建时注入；开发态为空） */
 export const BUILD_AT = process.env.NEXT_PUBLIC_BUILD_AT || '';
@@ -36,6 +36,24 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  {
+    version: 'v5.14.0',
+    at: '09-16 01:10',
+    items: [
+      'WB-MCP 录入更聪明：即使明确指定待办、日程或开发待办类型，也会先读完全文提炼标题和关键字段，不再直接截取原文开头',
+      '新增 WB-MCP 控制台：版本、能力清单、更新命令、给 Agent 的提示词和更新日志集中在一个页面，侧边栏「AI 开发」可直接进入',
+      '日程录入的时间、地点更可靠：显式填写优先，AI 提取兜底，界面统一按北京时间显示',
+    ],
+  },
+  {
+    version: 'v5.13.1',
+    at: '09-16 00:20',
+    items: [
+      '左侧菜单切换更快：点击待办、日程、专注等入口不再整页刷新，边栏和全局播放器保持原样，只更换右侧内容',
+      '全站 30 个同窗入口同步提速：今日页、手机底栏、全部域、笔记、画布、教育、成长等点击后都不再整页刷新',
+      '浏览器后退/前进时，右侧内容和菜单高亮同步切换；二级菜单的手动展开状态也不会丢',
+    ],
+  },
   {
     version: 'v5.13.0',
     at: '09-15 22:00',
