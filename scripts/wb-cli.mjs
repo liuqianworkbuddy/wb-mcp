@@ -24,11 +24,11 @@
  *     fire-and-forget 失败不阻断主流程
  *
  * 用法示例：
-   *   node scripts/wb-cli.mjs add "明天上午10点提醒我与周晨凯对Q3数据"
-   *   node scripts/wb-cli.mjs add --file ~/Downloads/三体.epub
-   *   node scripts/wb-cli.mjs add "修复：看板闪烁" --type bug --yes
+ *   node scripts/wb-cli.mjs add "明天上午10点提醒我与周晨凯对Q3数据"
+ *   node scripts/wb-cli.mjs add --file ~/Downloads/三体.epub
+ *   node scripts/wb-cli.mjs add "修复：看板闪烁" --type bug --yes
  *   node scripts/wb-cli.mjs bug add "修复：看板拖拽时卡片闪烁" --yes
-   *   node scripts/wb-cli.mjs todo list [--status pending|featured|completed] [--today] [--json]
+ *   node scripts/wb-cli.mjs todo list [--status pending|featured|completed] [--today] [--json]
  *   node scripts/wb-cli.mjs todo done <id>
  *   node scripts/wb-cli.mjs idea list / bug list --open / capsule list / book list
  *   node scripts/wb-cli.mjs search 周晨凯 [--table todos|capsules|ai_ideas|ai_bugs|articles_inbox|people]
