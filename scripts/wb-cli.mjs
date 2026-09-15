@@ -5,7 +5,7 @@
  * 用途（刘总 2026-08-21 任务包 C / id a05596fa）：
  *   1) add <文本|文件路径>  —— 全类型录入（9 类）AI 自动判类落库
  *      覆盖：待办/AI点子/开发待办/闪念/日记/公众号收藏/日程/电子书
- *   2) todo/idea/bug/capsule/book list —— 各域查询
+ *   2) todo/idea/bug/capsule/book —— 各域直达录入与查询
  *   3) search <关键词>       —— ilike 全文检索（多表）
  *   4) fill <模板名>         —— 输出预置提示词模板（日报/周报素材/点子复盘）
  *
@@ -17,16 +17,18 @@
  *     禁止 import lib/ai.ts——该文件被任务包 A 独占）
  *   - 🔴 镜像铁律：idea → ai_ideas + 镜像 todos（category='AI灵感'，description 带 id 回指）；
  *     bug → ai_bugs + 镜像 todos（category='开发待办'，dev_bug_id 挂接）。绝不直写 todos 完事。
- *   - 写操作安全：先回显「将写入」再执行（--yes 跳过）；--type <别名> 可强制指定类型
+ *   - 写操作安全：先回显「将写入」再执行（--yes 跳过）；--type <别名> 只锁定类型，
+ *     标题与关键字段仍走 AI 提取（AI 不可用才本地降级）
  *   - 27N3B（id f0c0c3dc）：所有写操作（add/todo/idea/schedule/capsule tag/book）经 REST 等价写
  *     action_logs（口径同 lib/action-log.ts：action=cli_*，detail 带 title+content 全量），
  *     fire-and-forget 失败不阻断主流程
  *
  * 用法示例：
- *   node scripts/wb-cli.mjs add "明天上午10点提醒我与周晨凯对Q3数据"
- *   node scripts/wb-cli.mjs add --file ~/Downloads/三体.epub
- *   node scripts/wb-cli.mjs add "修复：看板闪烁" --type bug --yes
- *   node scripts/wb-cli.mjs todo list [--status pending|featured|completed] [--today] [--json]
+   *   node scripts/wb-cli.mjs add "明天上午10点提醒我与周晨凯对Q3数据"
+   *   node scripts/wb-cli.mjs add --file ~/Downloads/三体.epub
+   *   node scripts/wb-cli.mjs add "修复：看板闪烁" --type bug --yes
+ *   node scripts/wb-cli.mjs bug add "修复：看板拖拽时卡片闪烁" --yes
+   *   node scripts/wb-cli.mjs todo list [--status pending|featured|completed] [--today] [--json]
  *   node scripts/wb-cli.mjs todo done <id>
  *   node scripts/wb-cli.mjs idea list / bug list --open / capsule list / book list
  *   node scripts/wb-cli.mjs search 周晨凯 [--table todos|capsules|ai_ideas|ai_bugs|articles_inbox|people]
@@ -39,7 +41,7 @@ import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { makeApi, resolveAuth, authHint, GATEWAY_BASE } from '../lib/wb-auth.mjs';
 import {
-  TYPE_LABEL, TYPE_TABLE, buildClassifyPrompt,
+  TYPE_LABEL, TYPE_TABLE, buildClassifyPrompt, normalizeClassifyDecision,
 } from '../lib/wb-cli/classify-prompt.mjs';
 import {
   mapTodo, mapSchedule, mapCapsule, mapArticle, mapIdea, mapIdeaMirrorTodo,
@@ -188,6 +190,7 @@ let FLAGS = {};
  * 仅 stderr 提示——静默吞参数是「过滤不生效」类 bug 的直接根因
  * （如 todo list 只认 --cat，传 --category 会被无声忽略恒返全量）。 */
 const KNOWN_FLAGS = {
+  'todo add': ['json', 'yes', 'idempotency-key', 'content-file', 'stdin'],
   'todo list': ['json', 'status', 'today', 'cat', 'prio', 'tag', 'overdue', 'limit', 'cursor', 'all', 'fields'],
   'add': ['json', 'yes', 'type', 'file', 'idempotency-key', 'content-file', 'stdin', 'profile'],
   'idea add': ['json', 'yes', 'title', 'idempotency-key', 'content-file', 'stdin'],
@@ -195,8 +198,10 @@ const KNOWN_FLAGS = {
   'schedule add': ['json', 'yes', 'at', 'loc', 'idempotency-key', 'content-file', 'stdin'],
   'dev-task list': ['json', 'search', 'status', 'limit', 'cursor', 'all', 'fields'],
   'bug list': ['json', 'open', 'status', 'module', 'limit', 'cursor', 'all', 'fields'],
+  'bug add': ['json', 'yes', 'idempotency-key', 'content-file', 'stdin'],
   'book list': ['json', 'limit', 'cursor', 'all', 'fields'],
   'capsule list': ['json', 'limit', 'category', 'tag', 'cursor', 'all', 'fields'],
+  'capsule add': ['json', 'yes', 'idempotency-key', 'content-file', 'stdin'],
   'note list': ['json', 'limit', 'tag', 'cursor', 'all', 'fields'],
 };
 function warnUnknownFlags(cmd, sub, flags) {
@@ -228,7 +233,7 @@ function pageOpts(flags, defLimit) {
 const BAILIAN_MODEL = 'qwen-flash';
 const BAILIAN_TIMEOUT_MS = 8000;
 
-async function aiClassifyRaw(raw, catNames) {
+async function aiClassifyRaw(raw, catNames, forcedType = null) {
   const key = getBailianKey();
   if (!key) return null;
   const ctrl = new AbortController();
@@ -239,7 +244,7 @@ async function aiClassifyRaw(raw, catNames) {
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
       body: JSON.stringify({
         model: BAILIAN_MODEL,
-        messages: [{ role: 'user', content: buildClassifyPrompt(raw, todayCtx(), catNames) }],
+        messages: [{ role: 'user', content: buildClassifyPrompt(raw, todayCtx(), catNames, forcedType) }],
         temperature: 0.1,
         response_format: { type: 'json_object' },
       }),
@@ -251,13 +256,28 @@ async function aiClassifyRaw(raw, catNames) {
     if (!content) return null;
     const cleaned = content.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
     const parsed = JSON.parse(cleaned);
-    parsed._raw = raw;
-    return parsed;
+    return normalizeClassifyDecision(parsed, raw, forcedType);
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * 统一录入提取入口：强制类型只锁定目标表，不跳过 AI 标题/字段提取。
+ * AI 不可用时才降级 localClassify，并保留调用方指定的 forced type。
+ */
+async function extractAddDecision(raw, forcedType = null) {
+  const polished = await polishIfNoisy(raw);
+  const catNames = await fetchCategoryNames();
+  const decision = await aiClassifyRaw(polished, catNames, forcedType);
+  if (decision) return { raw: polished, decision };
+
+  const fallback = localClassify(polished, false);
+  if (forcedType) fallback.type = forcedType;
+  console.error(`ℹ️ AI 判类不可用（无 Key/超时），已降级本地关键词判类：${fallback.reason}`);
+  return { raw: polished, decision: fallback };
 }
 
 /* ============================================================
@@ -412,7 +432,13 @@ function parseNaturalDateTime(text, now = new Date()) {
     d.setHours(9, 0, 0, 0);
   }
   // 只有时间没有日期词 → 今天；只有日期词没时间 → 9:00
-  return { iso: d.toISOString(), matched: matched || hasTime };
+  return { iso: toShanghaiIso(d), matched: matched || hasTime };
+}
+
+/** 将 Date 转成带 +08:00 的 ISO 串，避免 CLI 回显把北京时间显示成 UTC。 */
+function toShanghaiIso(dateOrMs) {
+  const date = dateOrMs instanceof Date ? dateOrMs : new Date(dateOrMs);
+  return `${new Date(date.getTime() + 8 * 3600000).toISOString().slice(0, 19)}+08:00`;
 }
 
 /* ============================================================
@@ -456,22 +482,11 @@ async function cmdAddRun(raw, fileArg, flags, pos, idemKey) {
     return addBook(raw, '', flags);
   }
 
-  // --type 强制指定 → 跳过 AI 判类
-  let decision;
+  // --type 只锁定目标表；标题与关键字段仍必须走 AI 提取（AI 不可用才本地降级）
   const forced = resolveTypeAlias(flags.type);
-  if (forced) {
-    const url = extractUrl(raw);
-    decision = { type: forced, reason: '（--type 强制指定）', title: raw.replace(/^(修复|优化|bug|闪念|点子)[:：]?/i, '').split(/[,，。;；]/)[0].slice(0, 30), url, _raw: raw, kind: forced === 'bug' ? (/优化|改进/.test(raw) ? 'opt' : 'bug') : undefined, scheduleTime: raw };
-  } else {
-    // E2：口语转写噪声先修正，判类与落库基于修正文本（干净文本直过零成本）
-    raw = await polishIfNoisy(raw);
-    const catNames = await fetchCategoryNames();
-    decision = await aiClassifyRaw(raw, catNames);
-    if (!decision) {
-      decision = localClassify(raw, false);
-      console.error(`ℹ️ AI 判类不可用（无 Key/超时），已降级本地关键词判类：${decision.reason}`);
-    }
-  }
+  const extracted = await extractAddDecision(raw, forced);
+  raw = extracted.raw;
+  const decision = extracted.decision;
 
   // article 无 URL → 降级闪念（任务包硬规则）
   let finalType = decision.type;
@@ -518,15 +533,15 @@ async function dispatchAdd(type, c, flags, raw) {
     if (!row.start_at) {
       const p = parseNaturalDateTime(c.scheduleTime || raw);
       row.start_at = p.iso;
-      const e = new Date(p.iso); e.setTime(e.getTime() + 3600000);
-      row.end_at = e.toISOString();
+      row.end_at = toShanghaiIso(new Date(p.iso).getTime() + 3600000);
     } else if (!row.end_at) {
-      const e = new Date(row.start_at); if (!Number.isNaN(e.getTime())) { e.setTime(e.getTime() + 3600000); row.end_at = e.toISOString(); }
+      const e = new Date(row.start_at);
+      if (!Number.isNaN(e.getTime())) row.end_at = toShanghaiIso(e.getTime() + 3600000);
     }
     plan = { rows: [{ table: 'schedules', row, label: `日程「${row.title}」 ${String(row.start_at).slice(0, 16).replace('T', ' ')} ~ ${String(row.end_at).slice(0, 16).replace('T', ' ')}` }] };
   } else if (type === 'capsule' || type === 'diary') {
     const row = mapCapsule(c, type === 'diary');
-    plan = { rows: [{ table: 'capsules', row, label: `${type === 'diary' ? '日记' : '闪念'}「${(row.content || '').slice(0, 30)}」` }] };
+    plan = { rows: [{ table: 'capsules', row, label: `${type === 'diary' ? '日记' : '闪念'}「${row.title || (row.content || '').slice(0, 30)}」` }] };
   } else if (type === 'article') {
     const url = c.url || extractUrl(raw);
     let fallbackTitle = raw.replace(url, '').trim();
@@ -764,6 +779,12 @@ async function writeGuard(label, flags) {
 
 async function cmdTodo(flags, pos) {
   const sub = pos[0] || 'list';
+  if (sub === 'add') {
+    const { text: raw } = resolveLongInput(flags, pos.slice(1), { label: 'todo 文本' });
+    if (!raw) { console.error('用法: todo add <自然语言待办> [--content-file md] [--stdin] [--yes] [--idempotency-key key]'); process.exitCode = 1; return; }
+    const extracted = await extractAddDecision(raw, 'todo');
+    return dispatchAdd('todo', extracted.decision, flags, extracted.raw);
+  }
   if (sub === 'done') {
     const id = pos[1];
     if (!id) { console.error('用法: todo done <id> [--yes]'); process.exitCode = 1; return; }
@@ -848,7 +869,7 @@ async function cmdTodo(flags, pos) {
     output({ updated }, () => console.log(`✅ 标签已更新「${updated.title}」：[${(updated.tags || []).join('、')}]`));
     return;
   }
-  if (sub !== 'list') { console.error(`未知子命令：${sub}（支持 list / done / edit / del / tag）`); process.exitCode = 1; return; }
+  if (sub !== 'list') { console.error(`未知子命令：${sub}（支持 add / list / done / edit / del / tag）`); process.exitCode = 1; return; }
 
   // A 段口径：查询/过滤/展示改 end_at（取日期部分），todo_date 仍查询带回兜底显示
   // C段 FR-7：apiList 游标分页——--limit/--cursor/--all/--fields，返回 {data,total,has_more,next_cursor}
@@ -890,7 +911,9 @@ async function cmdIdea(flags, pos) {
   if (sub === 'add') {
     const { text: raw } = resolveLongInput(flags, pos.slice(1), { label: 'idea 原文' }); // P1 FR-3 长输入
     if (!raw) { console.error('用法: idea add <点子原文> [--title "标题"] [--content-file md] [--stdin] [--yes] [--idempotency-key key]'); process.exitCode = 1; return; }
-    return dispatchAdd('idea', { _raw: raw, title: typeof flags.title === 'string' ? flags.title : raw.slice(0, 30), reason: '（idea add 直录）' }, flags, raw);
+    const extracted = await extractAddDecision(raw, 'idea');
+    if (typeof flags.title === 'string') extracted.decision.title = flags.title.trim().slice(0, 60);
+    return dispatchAdd('idea', extracted.decision, flags, extracted.raw);
   }
   if (sub === 'edit') {
     // 用法: idea edit <id> [--title "..."] [--one-liner "..."] [--status 待评估|孵化中|已落地|放弃] [--yes]
@@ -943,7 +966,15 @@ async function cmdIdea(flags, pos) {
   });
 }
 
-async function cmdBug(flags) {
+async function cmdBug(flags, pos = []) {
+  const sub = pos[0] || 'list';
+  if (sub === 'add') {
+    const { text: raw } = resolveLongInput(flags, pos.slice(1), { label: 'bug 原文' });
+    if (!raw) { console.error('用法: bug add <开发待办原文> [--content-file md] [--stdin] [--yes] [--idempotency-key key]'); process.exitCode = 1; return; }
+    const extracted = await extractAddDecision(raw, 'bug');
+    return dispatchAdd('bug', extracted.decision, flags, extracted.raw);
+  }
+
   // C段 FR-7：apiList 游标分页——--limit/--cursor/--all/--fields
   let extra = '';
   if (flags.open) extra += '&status=neq.fixed';
@@ -996,16 +1027,18 @@ async function cmdSchedule(flags, pos) {
   if (sub === 'add') {
     const { text: raw } = resolveLongInput(flags, pos.slice(1), { label: 'schedule 文本' }); // P1 FR-3 长输入
     if (!raw) { console.error('用法: schedule add <自然语言日程> [--at "2026-08-27 15:00"] [--loc 地点] [--content-file md] [--stdin] [--yes] [--idempotency-key key]'); process.exitCode = 1; return; }
-    const c = { _raw: raw, title: raw.replace(/^(日程[:：]?)?/, '').slice(0, 40), scheduleTime: raw, reason: '（schedule add 直录）' };
+    const extracted = await extractAddDecision(raw, 'schedule');
+    const c = extracted.decision;
+    c.scheduleTime = c.scheduleTime || extracted.raw;
     if (typeof flags.at === 'string') {
       // --at 显式时间：YYYY-MM-DD HH:mm
       const m = flags.at.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})$/);
       if (!m) { console.error('❌ --at 需 "YYYY-MM-DD HH:mm" 格式'); process.exitCode = 1; return; }
-      c.start_at = new Date(`${m[1]}T${String(m[2]).padStart(2, '0')}:${m[3]}:00+08:00`).toISOString();
-      c.end_at = new Date(new Date(c.start_at).getTime() + 3600000).toISOString();
+      c.start_at = `${m[1]}T${String(m[2]).padStart(2, '0')}:${m[3]}:00+08:00`;
+      c.end_at = toShanghaiIso(new Date(c.start_at).getTime() + 3600000);
     }
-    if (typeof flags.loc === 'string') c.location = flags.loc;
-    return dispatchAdd('schedule', c, flags, raw);
+    if (typeof flags.loc === 'string') c.location = flags.loc; // 显式地点优先于 AI 提取
+    return dispatchAdd('schedule', c, flags, extracted.raw);
   }
   if (sub === 'done') {
     const id = pos[1];
@@ -1038,6 +1071,12 @@ async function cmdSchedule(flags, pos) {
 
 async function cmdCapsule(flags, pos) {
   const sub = pos[0] || 'list';
+  if (sub === 'add') {
+    const { text: raw } = resolveLongInput(flags, pos.slice(1), { label: 'capsule 原文' });
+    if (!raw) { console.error('用法: capsule add <闪念原文> [--content-file md] [--stdin] [--yes] [--idempotency-key key]'); process.exitCode = 1; return; }
+    const extracted = await extractAddDecision(raw, 'capsule');
+    return dispatchAdd('capsule', extracted.decision, flags, extracted.raw);
+  }
   if (sub === 'search') {
     // Flomo memo_search 对标：关键词 + 标签 + 时间范围检索
     const kw = pos.slice(1).join(' ').trim();
@@ -1635,7 +1674,7 @@ async function main() {
     case 'add': return await cmdAdd(flags, pos);
     case 'todo': return await cmdTodo(flags, pos);
     case 'idea': return await cmdIdea(flags, pos);
-    case 'bug': return await cmdBug(flags);
+    case 'bug': return await cmdBug(flags, pos);
     case 'capsule': return await cmdCapsule(flags, pos);
     case 'schedule': return await cmdSchedule(flags, pos);
     case 'book': return await cmdBook(flags);
