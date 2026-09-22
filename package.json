@@ -1,6 +1,6 @@
 {
   "name": "wb-mcp",
-  "version": "5.20.0",
+  "version": "5.20.3",
   "private": true,
   "description": "AI 工作台 wb-cli 的 MCP server 壳（stdio transport）",
   "type": "module",
