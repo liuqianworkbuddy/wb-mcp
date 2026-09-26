@@ -4,7 +4,7 @@
  * - BUILD_AT：构建时间由 next.config.ts env 注入（NEXT_PUBLIC_BUILD_AT），
  *   静态导出后固化在产物里 = 该版本的上线时间；拿不到时降级为空（只显示版本号）。
  */
-export const APP_VERSION = 'v5.20.3';
+export const APP_VERSION = 'v5.21.0';
 
 /** 构建时间（ISO 字符串，构建时注入；开发态为空） */
 export const BUILD_AT = process.env.NEXT_PUBLIC_BUILD_AT || '';
@@ -36,6 +36,15 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  {
+    version: 'v5.21.0',
+    at: '09-26 23:26',
+    items: [
+      '设置页新增图床：上传图片后可以直接复制公网链接或 Markdown，方便发给别人和插入笔记',
+      '画布拖入或粘贴图片后会自动上传，右键图片即可复制公网链接',
+      'WB-MCP 新增图片上传工具，AI Agent 可以把本地图片传成可访问的链接',
+    ],
+  },
   {
     version: 'v5.20.3',
     at: '09-21 13:00',
