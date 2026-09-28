@@ -4,7 +4,7 @@
  * - BUILD_AT：构建时间由 next.config.ts env 注入（NEXT_PUBLIC_BUILD_AT），
  *   静态导出后固化在产物里 = 该版本的上线时间；拿不到时降级为空（只显示版本号）。
  */
-export const APP_VERSION = 'v5.21.0';
+export const APP_VERSION = 'v5.21.1';
 
 /** 构建时间（ISO 字符串，构建时注入；开发态为空） */
 export const BUILD_AT = process.env.NEXT_PUBLIC_BUILD_AT || '';
@@ -36,6 +36,15 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  {
+    version: 'v5.21.1',
+    at: '09-28 16:20',
+    items: [
+      '产物库新增 5 份资料：江总寄递旺季讲话稿逐段溯源对照、AI 工作台 UI 规范制度设计草案、Tabler 设计规范对标差距分析、Tabler 复用实测结论、WorkBuddy 专家与专家团机制解析',
+      '综合搜索的语义检索通道修复：向量接口改用专用鉴权并清理旧域名残留，AI 查资料更稳',
+      '笔记板块完成收口：拼音输入修复通过真机验收，开发任务九步链全部归档',
+    ],
+  },
   {
     version: 'v5.21.0',
     at: '09-26 23:26',
