@@ -54,6 +54,7 @@ import { makeCtx, loadCmdModules, makeApiList } from '../lib/wb-cli/shared.mjs';
 import { EXIT, envelopeOk, envelopeErr, classifyError, withCode, setLang } from '../lib/wb-cli/output.mjs';
 import { idempotencyLookup, idempotencySave } from '../lib/wb-cli/idempotency.mjs';
 import { resolveLongInput } from '../lib/wb-cli/shared.mjs';
+import { linkWrappedBugs } from '../lib/wb-cli/dev-task-linkage.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -1512,10 +1513,19 @@ async function cmdDevTask(flags, pos) {
     if (key === 'wrap' && status === 'done') patchRow.status = 'done';
     const rows = await patchDevTask(task.id, patchRow);
     const updated = Array.isArray(rows) ? rows[0] : null;
-    await logCli('update', 'ai', task.id, { title: `S${st.stage} ${st.name} → ${status}`, content: typeof flags.note === 'string' ? flags.note : '' });
-    output(updated || { id: task.id, stage: key, status }, () => {
+    let linkedBugs = null;
+    if (key === 'wrap' && status === 'done') {
+      linkedBugs = await linkWrappedBugs({ api, sourceBugIds: task.source_bug_ids });
+    }
+    await logCli('update', 'ai', task.id, { title: `S${st.stage} ${st.name} → ${status}`, content: typeof flags.note === 'string' ? flags.note : '', linkedBugs });
+    output(updated ? { ...updated, linked_bugs: linkedBugs } : { id: task.id, stage: key, status, linked_bugs: linkedBugs }, () => {
       console.log(`✅ ${task.id} S${st.stage} ${st.name} → ${status}${url ? '\n   产物：' + url : ''}`);
-      if (key === 'wrap' && status === 'done') console.log('🎉 开发任务全流程闭环（status=done）');
+      if (key === 'wrap' && status === 'done') {
+        console.log('🎉 开发任务全流程闭环（status=done）');
+        console.log(`   关联待办：fixed=${linkedBugs.fixed.length} alreadyFixed=${linkedBugs.alreadyFixed.length} missing=${linkedBugs.missing.length} failed=${linkedBugs.failed.length}`);
+        for (const item of linkedBugs.missing) console.log(`   ⚠️ 待人工确认（缺失）：${item.id} ${item.reason}`);
+        for (const item of linkedBugs.failed) console.log(`   ⚠️ 待人工确认（失败）：${item.id} ${item.error}`);
+      }
     });
     return;
   }

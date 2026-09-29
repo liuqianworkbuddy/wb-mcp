@@ -4,7 +4,7 @@
  * - BUILD_AT：构建时间由 next.config.ts env 注入（NEXT_PUBLIC_BUILD_AT），
  *   静态导出后固化在产物里 = 该版本的上线时间；拿不到时降级为空（只显示版本号）。
  */
-export const APP_VERSION = 'v5.21.1';
+export const APP_VERSION = 'v6.0.0';
 
 /** 构建时间（ISO 字符串，构建时注入；开发态为空） */
 export const BUILD_AT = process.env.NEXT_PUBLIC_BUILD_AT || '';
@@ -36,6 +36,20 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  {
+    version: 'v6.0.0',
+    at: '09-29 19:38',
+    items: [
+      'AI 工作台升级为 V6 大版本：六个任务包一次性合入，覆盖工具链、画布、笔记、搜索、录音和日历',
+      '保留并继承线上 v5.22.0 的技能商店：/skills 页面、skill 命令族与 wb_skill 域工具继续可用，并补齐写操作确认门',
+      'AI Agent 可把本机完整 HTML 上传成产物链接；开发任务收尾时会自动回写关联待办，减少漏打标',
+      '画布支持跟随全局深浅色并可锁定单画布主题，AI 创建元素的过程记录更完整，笔记元素交互更顺手',
+      '笔记支持多选导出 Markdown，并新增双链知识图谱，可以按关系浏览和跳转笔记',
+      '综合搜索和命令面板升级为语义加关键词混合排序，查闪念、日记、笔记更准',
+      '录音笔支持拖动进度条与转写文字互相定位；闪念新增表格盘点视图；开发任务产物长内容不再撑破页面',
+      '日历升级为一历三用：同一天能看到日程、日记和笔记标记，并可跳转对应详情',
+    ],
+  },
   {
     version: 'v5.21.1',
     at: '09-28 16:20',
