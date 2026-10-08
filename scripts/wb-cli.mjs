@@ -193,7 +193,7 @@ let FLAGS = {};
 const KNOWN_FLAGS = {
   'todo add': ['json', 'yes', 'idempotency-key', 'content-file', 'stdin'],
   'todo list': ['json', 'status', 'today', 'cat', 'prio', 'tag', 'overdue', 'limit', 'cursor', 'all', 'fields'],
-  'add': ['json', 'yes', 'type', 'file', 'idempotency-key', 'content-file', 'stdin', 'profile'],
+  'add': ['json', 'yes', 'type', 'file', 'idempotency-key', 'content-file', 'stdin', 'profile', 'at'],
   'idea add': ['json', 'yes', 'title', 'idempotency-key', 'content-file', 'stdin'],
   'note add': ['json', 'yes', 'idempotency-key', 'content-file', 'stdin'],
   'diary add': ['json', 'yes', 'idempotency-key', 'content-file', 'stdin'],
@@ -206,7 +206,7 @@ const KNOWN_FLAGS = {
   'bug add': ['json', 'yes', 'idempotency-key', 'content-file', 'stdin'],
   'book list': ['json', 'limit', 'cursor', 'all', 'fields'],
   'capsule list': ['json', 'limit', 'category', 'tag', 'cursor', 'all', 'fields'],
-  'capsule add': ['json', 'yes', 'idempotency-key', 'content-file', 'stdin'],
+  'capsule add': ['json', 'yes', 'at', 'idempotency-key', 'content-file', 'stdin'],
   'note list': ['json', 'limit', 'tag', 'cursor', 'all', 'fields'],
 };
 function warnUnknownFlags(cmd, sub, flags) {
@@ -449,6 +449,41 @@ function toShanghaiIso(dateOrMs) {
   return `${new Date(date.getTime() + 8 * 3600000).toISOString().slice(0, 19)}+08:00`;
 }
 
+/**
+ * --at 时间入参 → 真 UTC ISO 串（供 capsules.created_at 等 UTC 列回填历史时间）。
+ * 支持：'YYYY-MM-DD HH:mm[:ss]'、'YYYY/MM/DD HH:mm'（**无时区 → 视为北京时间 UTC+8**）、
+ * 带显式时区（Z / ±HH:MM）。
+ * 返回 null 表示无法解析（true=缺值）。
+ * 背景：长期需按「原对话时间」补录闪念，CLI 此前只能落当前时间，被迫绕 REST。
+ */
+function parseAtToUtc(input) {
+  if (input == null || input === true) return null;
+  const s = String(input).trim();
+  if (!s) return null;
+  // 显式时区 → 交给 Date 原生解析
+  if (/(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(s)) {
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  const norm = s.replace(/\//g, '-').replace('T', ' ').trim();
+  const m = norm.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (!m) {
+    const d = new Date(s);
+    return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  const p = (n) => String(n).padStart(2, '0');
+  const iso = `${m[1]}-${p(m[2])}-${p(m[3])}T${p(m[4] || '0')}:${p(m[5] || '00')}:${p(m[6] || '00')}+08:00`;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/** 真 UTC ISO → 北京时间 'YYYY-MM-DD HH:mm'（列表/检索回显专用，避免 UTC 日期差一天）。 */
+function beijingDateTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso || '').slice(0, 16).replace('T', ' ');
+  return new Date(d.getTime() + 8 * 3600000).toISOString().slice(0, 16).replace('T', ' ');
+}
+
 /* ============================================================
  * add：全类型录入
  * ============================================================ */
@@ -549,7 +584,21 @@ async function dispatchAdd(type, c, flags, raw) {
     plan = { rows: [{ table: 'schedules', row, label: `日程「${row.title}」 ${String(row.start_at).slice(0, 16).replace('T', ' ')} ~ ${String(row.end_at).slice(0, 16).replace('T', ' ')}` }] };
   } else if (type === 'capsule') {
     const row = mapCapsule(c);
-    plan = { rows: [{ table: 'capsules', row, label: `闪念「${row.title || (row.content || '').slice(0, 30)}」` }] };
+    const title = row.title || (row.content || '').slice(0, 30);
+    // --at：按指定历史时间落库（补录场景，如「原对话时间」）。
+    // 不传 → created_at 由 DB 默认 now() 填当前时间，行为与旧版一致。
+    if (flags.at != null) {
+      const atUtc = parseAtToUtc(flags.at);
+      if (!atUtc) {
+        console.error(`❌ --at 时间无法解析：${flags.at === true ? '(缺值)' : flags.at}（示例：--at "2026-10-04 02:00"）`);
+        process.exitCode = 1;
+        return;
+      }
+      row.created_at = atUtc;
+      plan = { rows: [{ table: 'capsules', row, label: `闪念「${title}」（时间改为 ${beijingDateTime(atUtc)}）` }] };
+    } else {
+      plan = { rows: [{ table: 'capsules', row, label: `闪念「${title}」` }] };
+    }
   } else if (type === 'diary') {
     const row = mapDiary(c);
     plan = { rows: [{ table: 'diaries', row, label: `日记「${row.title || (row.content_md || '').slice(0, 30)}」` }] };
@@ -1087,7 +1136,7 @@ async function cmdCapsule(flags, pos) {
   const sub = pos[0] || 'list';
   if (sub === 'add') {
     const { text: raw } = resolveLongInput(flags, pos.slice(1), { label: 'capsule 原文' });
-    if (!raw) { console.error('用法: capsule add <闪念原文> [--content-file md] [--stdin] [--yes] [--idempotency-key key]'); process.exitCode = 1; return; }
+    if (!raw) { console.error('用法: capsule add <闪念原文> [--at "YYYY-MM-DD HH:mm"] [--content-file md] [--stdin] [--yes] [--idempotency-key key]'); process.exitCode = 1; return; }
     const extracted = await extractAddDecision(raw, 'capsule');
     return dispatchAdd('capsule', extracted.decision, flags, extracted.raw);
   }
@@ -1108,7 +1157,7 @@ async function cmdCapsule(flags, pos) {
         const tags = Array.isArray(c.tags) && c.tags.length ? `  #${c.tags.join(' #')}` : '';
         console.log(`💫 [${c.category}] ${(c.title || c.content || '').slice(0, 40)}${tags}`);
         console.log(`   ${(c.content || '').slice(0, 80)}${(c.content || '').length > 80 ? '…' : ''}`);
-        console.log(`   id=${c.id}  ${String(c.created_at).slice(0, 10)}`);
+        console.log(`   id=${c.id}  ${beijingDateTime(c.created_at)}`);
       }
     });
     return;
@@ -1197,7 +1246,7 @@ async function cmdCapsule(flags, pos) {
       const tags = Array.isArray(c.tags) && c.tags.length ? `  #${c.tags.join(' #')}` : '';
       console.log(`💫 [${c.category}] ${(c.title || c.content || '').slice(0, 40)}${tags}`);
       console.log(`   ${(c.content || '').slice(0, 60)}${(c.content || '').length > 60 ? '…' : ''}`);
-      console.log(`   id=${c.id}  ${String(c.created_at).slice(0, 10)}`);
+      console.log(`   id=${c.id}  ${beijingDateTime(c.created_at)}`);
     }
   });
 }
@@ -1625,6 +1674,8 @@ function usage() {
   schedule done <id前缀> [--yes]
   schedule list [--since YYYY-MM-DD]
   capsule list [--limit N] [--category 分类] [--tag 标签]
+  capsule add <闪念原文> [--at "YYYY-MM-DD HH:mm"] [--yes]
+                                按指定时间落库（补录历史；缺省/无时区按北京时间）
   capsule search [关键词] [--tag 标签] [--since 日期] [--until 日期]
   diary add "<日记正文>" [--content-file md] [--yes]
   diary list [--limit N] [--tag 标签] [--date YYYY-MM-DD]
