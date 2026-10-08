@@ -4,7 +4,7 @@
  * - BUILD_AT：构建时间由 next.config.ts env 注入（NEXT_PUBLIC_BUILD_AT），
  *   静态导出后固化在产物里 = 该版本的上线时间；拿不到时降级为空（只显示版本号）。
  */
-export const APP_VERSION = 'v6.2.0';
+export const APP_VERSION = 'v6.3.0';
 
 /** 构建时间（ISO 字符串，构建时注入；开发态为空） */
 export const BUILD_AT = process.env.NEXT_PUBLIC_BUILD_AT || '';
@@ -36,6 +36,26 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  {
+    version: 'v6.3.0',
+    at: '10-08 16:45',
+    items: [
+      '技能商店挪到「AI 开发」下面，新入口是 /ai/skills/，原来的 /skills/ 仍能打开',
+      '技能卡片标题改成十来个字以内的一句话功能概括，下面配 3-5 句具体用法说明',
+      '技能卡片上直接提供“安装”和“下载 zip”按钮，不用先点进详情页',
+      '点卡片“安装”会直接给出 wb-mcp 安装命令，可一键复制给本机 AI 助手执行',
+      '以后上架技能必须写短标题和至少三句说明，避免商店里只剩英文目录名',
+    ],
+  },
+  {
+    version: 'v6.2.1',
+    at: '10-08 14:45',
+    items: [
+      '画布右键 AI 判类添加元素后，新元素落在您正在看的位置附近，不再固定跑到左上角',
+      '画布上只改文字颜色、字号等样式时也会自动保存，添加元素或重新打开后格式不再丢失',
+      '画布详情抽屉能正确找到待办、点子、开发待办的源记录，不再误报“源记录不存在”',
+    ],
+  },
   {
     version: 'v6.2.0',
     at: '10-06 02:00',
