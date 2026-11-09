@@ -1,9 +1,9 @@
 # wb-mcp
 
-AI 工作台 wb-cli 的 MCP server 壳（stdio transport）。把 wb-cli 命令族暴露为标准 MCP tool，
+AI 工作台 wb-cli 的 MCP server 壳（stdio + Streamable HTTP 双 transport）。把 wb-cli 命令族暴露为标准 MCP tool，
 供 Codex / DeepSeek CLI / Claude Code / WorkBuddy 等 MCP 客户端直连。
 
-> 版本：6.3.0 · 由主仓 \`scripts/release-wb-mcp.mjs\` 一键同步发布
+> 版本：6.8.5 · 由主仓 \`scripts/release-wb-mcp.mjs\` 一键同步发布
 
 ## 三步安装（任意机器）
 
@@ -58,6 +58,29 @@ npm run probe
 
 key 文件位置：\`~/.workbuddy/agents/<profile>.env\`（WB_API_KEY=wbk_xxx）。
 新机器首次使用前，请在工作台网页「设置 → API Key」自助签发并写入该文件。
+
+## 远程模式（Streamable HTTP · stateless）
+
+远程化 Phase 0（2026-10-19）起支持，Phase 1 上线线上端点：
+
+```bash
+# 本地启动（127.0.0.1:3100，开发态可免 token）
+npm run start:http
+# 冒烟四步：health → initialize → tools/list → 只读调用
+npm run probe:http
+# Docker（对外监听强制 WB_MCP_HTTP_TOKEN）
+docker build -t wb-mcp -f docker/wb-mcp/Dockerfile . && docker run -e WB_MCP_HTTP_TOKEN=xxx -p 127.0.0.1:3100:3100 wb-mcp
+```
+
+MCP 客户端 URL 型配置（Phase 1 上线后）：
+
+```json
+{ "mcpServers": { "wb": { "url": "https://api.liflow.cn/v1/mcp",
+  "headers": { "Authorization": "Bearer <wbk_ key>" } } } }
+```
+
+环境变量：WB_MCP_HTTP_HOST（默认 127.0.0.1）/ WB_MCP_HTTP_PORT（3100）/
+WB_MCP_HTTP_TOKEN（外联必填；内层鉴权，外层由 ai-proxy verifyApiKey 把关）。
 
 ## 8 个域 tool 与细粒度 write tool
 

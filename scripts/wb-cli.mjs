@@ -207,6 +207,7 @@ const KNOWN_FLAGS = {
   'book list': ['json', 'limit', 'cursor', 'all', 'fields'],
   'capsule list': ['json', 'limit', 'category', 'tag', 'cursor', 'all', 'fields'],
   'capsule add': ['json', 'yes', 'at', 'idempotency-key', 'content-file', 'stdin'],
+  'capsule edit': ['json', 'yes', 'title'],
   'note list': ['json', 'limit', 'tag', 'cursor', 'all', 'fields'],
 };
 function warnUnknownFlags(cmd, sub, flags) {
@@ -1162,6 +1163,34 @@ async function cmdCapsule(flags, pos) {
     });
     return;
   }
+  if (sub === 'edit') {
+    // 用法: capsule edit <id前缀> --title "新标题" [--yes]（仅改标题；日记/笔记归档行拒绝，走 diary/note）
+    const id = pos[1];
+    const rawTitle = typeof flags.title === 'string' ? flags.title : '';
+    if (!id || !rawTitle.trim()) {
+      console.error('用法: capsule edit <id前缀> --title "新标题" [--yes]');
+      process.exitCode = 1; return;
+    }
+    const row = await findByIdPrefix('capsules', id, 'id,title,content,category,tags');
+    if (['日记', '笔记'].includes(row.category)) {
+      console.error(`❌ 该记录已归${row.category}域，请使用${row.category === '日记' ? 'diary' : 'note'}命令`);
+      process.exitCode = 1;
+      return;
+    }
+    const oldTitle = (row.title || row.content || '').slice(0, TITLE_MAX);
+    const nextTitle = rawTitle.trim().slice(0, TITLE_MAX);
+    const patch = { title: nextTitle };
+    if (!(await writeGuard(`闪念改标题「${oldTitle}」→「${nextTitle}」`, flags))) return;
+    const [updated] = await api('PATCH', `capsules?id=eq.${encodeURIComponent(row.id)}&select=*`, patch);
+    await logCli('cli_edit', 'capsule', row.id, {
+      title: nextTitle,
+      content: `标题：「${oldTitle}」→「${nextTitle}」`,
+      type: '闪念改标题',
+      table: 'capsules',
+    });
+    output({ updated }, () => console.log(`✅ 已修改闪念标题「${updated.title}」（id=${updated.id}）`));
+    return;
+  }
   if (sub === 'tag') {
     // Flomo tag_tree / tag_rename 对标
     const id = pos[1];
@@ -1221,6 +1250,11 @@ async function cmdCapsule(flags, pos) {
     const [updated] = await api('PATCH', `capsules?id=eq.${encodeURIComponent(row.id)}&select=id,title,tags`, { tags: next });
     await logCli('cli_tag', 'capsule', row.id, { title: (row.title || row.content || '').slice(0, 30), content: `标签：[${cur.join('、')}] → [${next.join('、')}]`, type: '胶囊标签', table: 'capsules' });
     output({ updated }, () => console.log(`✅ 标签已更新：[${(updated.tags || []).join('、')}]（id=${updated.id}）`));
+    return;
+  }
+  if (sub !== 'list') {
+    console.error(`未知子命令：${sub}（支持 list / add / search / edit / tag）`);
+    process.exitCode = 1;
     return;
   }
   // list（默认）——C段 FR-7：apiList 游标分页
@@ -1677,6 +1711,7 @@ function usage() {
   capsule add <闪念原文> [--at "YYYY-MM-DD HH:mm"] [--yes]
                                 按指定时间落库（补录历史；缺省/无时区按北京时间）
   capsule search [关键词] [--tag 标签] [--since 日期] [--until 日期]
+  capsule edit <id前缀> --title "新标题" [--yes]   改闪念标题（日记/笔记归档行走 diary/note）
   diary add "<日记正文>" [--content-file md] [--yes]
   diary list [--limit N] [--tag 标签] [--date YYYY-MM-DD]
   diary show <id前缀> / diary search <关键词> / diary edit / diary tag
