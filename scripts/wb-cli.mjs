@@ -233,15 +233,24 @@ function pageOpts(flags, defLimit) {
 }
 
 /* ============================================================
- * AI 判类（百炼 qwen-flash + json_object；失败返回 null 降级）
+ * AI 判类（百炼 qwen-flash + json_object；失败结构化返回降级原因）
+ * bug 55c227e7 B：不再裸 null——调用方/JSON 必须能看见失败码
  * ============================================================ */
 
 const BAILIAN_MODEL = 'qwen-flash';
-const BAILIAN_TIMEOUT_MS = 8000;
+const BAILIAN_TIMEOUT_MS = Number(process.env.WB_AI_TIMEOUT_MS) || 8000;
+const AI_ERR_MSG_MAX = 160;
+
+/** 上游错误信息安全化：压缩空白、截断、抹掉可能的 Key 值（绝不拼 Key 进 message） */
+function safeUpstreamMsg(text, secret) {
+  let s = String(text || '').replace(/\s+/g, ' ').trim().slice(0, AI_ERR_MSG_MAX);
+  if (secret) s = s.split(secret).join('<redacted>');
+  return s;
+}
 
 async function aiClassifyRaw(raw, catNames, forcedType = null) {
   const key = getBailianKey();
-  if (!key) return null;
+  if (!key) return { ok: false, error: { code: 'NO_KEY', message: '未配置 BAILIAN_API_KEY / DASHSCOPE_API_KEY', stage: 'preflight' } };
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), BAILIAN_TIMEOUT_MS);
   try {
@@ -256,15 +265,33 @@ async function aiClassifyRaw(raw, catNames, forcedType = null) {
       }),
       signal: ctrl.signal,
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      let upstream = '';
+      try {
+        const body = await resp.text();
+        try { const j = JSON.parse(body); upstream = j?.error?.message || j?.message || body; }
+        catch { upstream = body; }
+      } catch { /* 读 body 失败不掩盖主错误 */ }
+      const msg = safeUpstreamMsg(upstream, key);
+      return { ok: false, error: { code: `HTTP_${resp.status}`, message: `百炼 HTTP ${resp.status}${msg ? `：${msg}` : ''}`, stage: 'http' } };
+    }
     const data = await resp.json();
     const content = data?.choices?.[0]?.message?.content;
-    if (!content) return null;
+    if (!content) return { ok: false, error: { code: 'EMPTY_CONTENT', message: '百炼返回 2xx 但 message.content 为空', stage: 'parse' } };
     const cleaned = content.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
-    const parsed = JSON.parse(cleaned);
-    return normalizeClassifyDecision(parsed, raw, forcedType);
-  } catch {
-    return null;
+    let parsed;
+    try { parsed = JSON.parse(cleaned); }
+    catch (e) {
+      return { ok: false, error: { code: 'PARSE_FAILED', message: `AI 返回非合法 JSON：${safeUpstreamMsg(cleaned, key).slice(0, 80)}`, stage: 'parse' } };
+    }
+    const decision = normalizeClassifyDecision(parsed, raw, forcedType);
+    if (!decision) return { ok: false, error: { code: 'NORMALIZE_REJECTED', message: 'AI 结构未过归一化校验（type/标题非法），拒绝落库', stage: 'normalize' } };
+    return { ok: true, decision };
+  } catch (e) {
+    const aborted = ctrl.signal.aborted || e?.name === 'AbortError';
+    return aborted
+      ? { ok: false, error: { code: 'TIMEOUT', message: `百炼调用超时（>${BAILIAN_TIMEOUT_MS}ms）`, stage: 'fetch' } }
+      : { ok: false, error: { code: 'NETWORK', message: `百炼网络异常：${safeUpstreamMsg(e?.message, key)}`, stage: 'fetch' } };
   } finally {
     clearTimeout(timer);
   }
@@ -277,13 +304,13 @@ async function aiClassifyRaw(raw, catNames, forcedType = null) {
 async function extractAddDecision(raw, forcedType = null) {
   const polished = await polishIfNoisy(raw);
   const catNames = await fetchCategoryNames();
-  const decision = await aiClassifyRaw(polished, catNames, forcedType);
-  if (decision) return { raw: polished, decision };
+  const ai = await aiClassifyRaw(polished, catNames, forcedType);
+  if (ai.ok) return { raw: polished, decision: ai.decision, ai_used: true, ai_error: null, fallback: null };
 
   const fallback = localClassify(polished, false);
   if (forcedType) fallback.type = forcedType;
-  console.error(`ℹ️ AI 判类不可用（无 Key/超时），已降级本地关键词判类：${fallback.reason}`);
-  return { raw: polished, decision: fallback };
+  console.error(`⚠️ AI 起标题失败（${ai.error.code}：${ai.error.message}），已降级本地关键词判类，标题可能为原文截断：${fallback.reason}`);
+  return { raw: polished, decision: fallback, ai_used: false, ai_error: ai.error, fallback: 'local_keywords' };
 }
 
 /* ============================================================
@@ -546,11 +573,11 @@ async function cmdAddRun(raw, fileArg, flags, pos, idemKey) {
     finalType = 'capsule';
   }
 
-  return dispatchAdd(finalType, decision, flags, raw);
+  return dispatchAdd(finalType, decision, flags, raw, extracted);
 }
 
 /** 按类型分发落库（回显 → 确认 → 写入 → 输出「类型+标题+落库表+id」） */
-async function dispatchAdd(type, c, flags, raw) {
+async function dispatchAdd(type, c, flags, raw, aiMeta = null) {
   // P1 FR-2 幂等：同 key 重试直接返回首次结果（命中即不再落库）
   const idemKey = typeof flags['idempotency-key'] === 'string' ? flags['idempotency-key'] : null;
   if (idemKey) {
@@ -656,7 +683,15 @@ async function dispatchAdd(type, c, flags, raw) {
   }
 
   // 写入（primary 先行拿 id，再建镜像）
-  const result = { type, reason: c.reason || '', writes: [] };
+  // bug 55c227e7 B：AI 成败元数据进 JSON，调用方（MCP/脚本）不依赖 stderr 也能看见降级原因
+  const result = {
+    type,
+    reason: c.reason || '',
+    ai_used: aiMeta?.ai_used ?? null,
+    ai_error: aiMeta?.ai_error ?? null,
+    fallback: aiMeta?.fallback ?? null,
+    writes: [],
+  };
   let primaryCreated = null;
   for (const r of plan.rows) {
     const [created] = await api('POST', r.table, r.row);
@@ -847,7 +882,7 @@ async function cmdTodo(flags, pos) {
     const { text: raw } = resolveLongInput(flags, pos.slice(1), { label: 'todo 文本' });
     if (!raw) { console.error('用法: todo add <自然语言待办> [--content-file md] [--stdin] [--yes] [--idempotency-key key]'); process.exitCode = 1; return; }
     const extracted = await extractAddDecision(raw, 'todo');
-    return dispatchAdd('todo', extracted.decision, flags, extracted.raw);
+    return dispatchAdd('todo', extracted.decision, flags, extracted.raw, extracted);
   }
   if (sub === 'done') {
     const id = pos[1];
@@ -977,7 +1012,7 @@ async function cmdIdea(flags, pos) {
     if (!raw) { console.error('用法: idea add <点子原文> [--title "标题"] [--content-file md] [--stdin] [--yes] [--idempotency-key key]'); process.exitCode = 1; return; }
     const extracted = await extractAddDecision(raw, 'idea');
     if (typeof flags.title === 'string') extracted.decision.title = flags.title.trim().slice(0, 60);
-    return dispatchAdd('idea', extracted.decision, flags, extracted.raw);
+    return dispatchAdd('idea', extracted.decision, flags, extracted.raw, extracted);
   }
   if (sub === 'edit') {
     // 用法: idea edit <id> [--title "..."] [--one-liner "..."] [--status 待评估|孵化中|已落地|放弃] [--yes]
@@ -1036,7 +1071,7 @@ async function cmdBug(flags, pos = []) {
     const { text: raw } = resolveLongInput(flags, pos.slice(1), { label: 'bug 原文' });
     if (!raw) { console.error('用法: bug add <开发待办原文> [--content-file md] [--stdin] [--yes] [--idempotency-key key]'); process.exitCode = 1; return; }
     const extracted = await extractAddDecision(raw, 'bug');
-    return dispatchAdd('bug', extracted.decision, flags, extracted.raw);
+    return dispatchAdd('bug', extracted.decision, flags, extracted.raw, extracted);
   }
 
   // C段 FR-7：apiList 游标分页——--limit/--cursor/--all/--fields
@@ -1102,7 +1137,7 @@ async function cmdSchedule(flags, pos) {
       c.end_at = toShanghaiIso(new Date(c.start_at).getTime() + 3600000);
     }
     if (typeof flags.loc === 'string') c.location = flags.loc; // 显式地点优先于 AI 提取
-    return dispatchAdd('schedule', c, flags, extracted.raw);
+    return dispatchAdd('schedule', c, flags, extracted.raw, extracted);
   }
   if (sub === 'done') {
     const id = pos[1];
@@ -1139,7 +1174,7 @@ async function cmdCapsule(flags, pos) {
     const { text: raw } = resolveLongInput(flags, pos.slice(1), { label: 'capsule 原文' });
     if (!raw) { console.error('用法: capsule add <闪念原文> [--at "YYYY-MM-DD HH:mm"] [--content-file md] [--stdin] [--yes] [--idempotency-key key]'); process.exitCode = 1; return; }
     const extracted = await extractAddDecision(raw, 'capsule');
-    return dispatchAdd('capsule', extracted.decision, flags, extracted.raw);
+    return dispatchAdd('capsule', extracted.decision, flags, extracted.raw, extracted);
   }
   if (sub === 'search') {
     // Flomo memo_search 对标：关键词 + 标签 + 时间范围检索

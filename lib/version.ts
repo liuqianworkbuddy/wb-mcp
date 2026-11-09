@@ -4,7 +4,7 @@
  * - BUILD_AT：构建时间由 next.config.ts env 注入（NEXT_PUBLIC_BUILD_AT），
  *   静态导出后固化在产物里 = 该版本的上线时间；拿不到时降级为空（只显示版本号）。
  */
-export const APP_VERSION = 'v6.8.5';
+export const APP_VERSION = 'v6.8.6';
 
 /** 构建时间（ISO 字符串，构建时注入；开发态为空） */
 export const BUILD_AT = process.env.NEXT_PUBLIC_BUILD_AT || '';
@@ -36,6 +36,13 @@ export interface ReleaseNote {
 }
 
 export const RELEASE_NOTES: ReleaseNote[] = [
+  {
+    version: 'v6.8.6',
+    at: '11-10 00:10',
+    items: [
+      '命令行/MCP 录入时 AI 起标题失败不再装成功，会明确提示失败原因（无 Key/超时/上游报错），并说明已降级用本地规则起标题',
+    ],
+  },
   {
     version: 'v6.8.5',
     at: '11-03 09:20',
